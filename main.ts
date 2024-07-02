@@ -1,3 +1,5 @@
+// #############################
+// main.ts
 import {
   LoomView,
   LoomSiblingsView,
@@ -14,6 +16,7 @@ import {
   NoteState,
   getPreset,
 } from './common';
+import Together from "together-ai";
 
 // import {
 //   claudeCompletion,
@@ -33,7 +36,7 @@ import {
 } from "obsidian";
 import { ViewPlugin } from "@codemirror/view";
 
-import { Configuration as AzureConfiguration, OpenAIApi as AzureOpenAIApi} from "azure-openai";
+import { Configuration as AzureConfiguration, OpenAIApi as AzureOpenAIApi } from "azure-openai";
 import { Configuration, OpenAIApi } from "openai";
 import * as cohere from "cohere-ai";
 import Anthropic from '@anthropic-ai/sdk';
@@ -63,17 +66,17 @@ const DEFAULT_SETTINGS: LoomSettings = {
 
   visibility: {
     "visibility": true,
-	"modelPreset": true,
-	"maxTokens": true,
-	"n": true,
-	"bestOf": false,
-	"temperature": true,
-	"topP": false,
-	"frequencyPenalty": false,
-	"presencePenalty": false,
-	"prepend": false,
-  "systemPrompt": false,
-  "userMessage": false,
+    "modelPreset": true,
+    "maxTokens": true,
+    "n": true,
+    "bestOf": false,
+    "temperature": true,
+    "topP": false,
+    "frequencyPenalty": false,
+    "presencePenalty": false,
+    "prepend": false,
+    "systemPrompt": false,
+    "userMessage": false,
   },
   maxTokens: 60,
   temperature: 1,
@@ -105,6 +108,7 @@ export default class LoomPlugin extends Plugin {
   azure: AzureOpenAIApi;
   anthropic: Anthropic;
   anthropicApiKey: string;
+  together: Together;
 
   rendering = false;
 
@@ -115,13 +119,13 @@ export default class LoomPlugin extends Plugin {
   }
 
   saveAndRender() {
-	this.save();
+    this.save();
 
     if (this.rendering) return;
     this.rendering = true;
 
-	this.renderLoomViews();
-	this.renderLoomSiblingsViews();
+    this.renderLoomViews();
+    this.renderLoomSiblingsViews();
 
     this.rendering = false;
 
@@ -129,7 +133,7 @@ export default class LoomPlugin extends Plugin {
 
   thenSaveAndRender(callback: () => void) {
     callback();
-	this.saveAndRender();
+    this.saveAndRender();
   }
 
   wftsar(callback: (file: TFile) => void) {
@@ -139,29 +143,34 @@ export default class LoomPlugin extends Plugin {
   }
 
   renderLoomViews() {
-	const views = this.app.workspace.getLeavesOfType("loom").map((leaf) => leaf.view) as LoomView[];
-	views.forEach((view) => view.render());
+    const views = this.app.workspace.getLeavesOfType("loom").map((leaf) => leaf.view) as LoomView[];
+    views.forEach((view) => view.render());
   }
 
   renderLoomSiblingsViews() {
-	const views = this.app.workspace.getLeavesOfType("loom-siblings").map((leaf) => leaf.view) as LoomSiblingsView[];
-	views.forEach((view) => view.render());
+    const views = this.app.workspace.getLeavesOfType("loom-siblings").map((leaf) => leaf.view) as LoomSiblingsView[];
+    views.forEach((view) => view.render());
   }
 
   initializeProviders() {
     const preset = getPreset(this.settings);
     if (preset === undefined) return;
-    
+
     if (preset.provider === "openai") {
       this.openai = new OpenAIApi(new Configuration({
         apiKey: preset.apiKey,
-      // @ts-expect-error TODO
+        basePath: preset.url,
+        // @ts-expect-error TODO
         organization: preset.organization,
       }));
-    } else if (preset.provider == "cohere")
+    } else if (preset.provider == "together") {
+        this.together = new Together({
+          apiKey: preset.apiKey,
+        });
+    }
+    else if (preset.provider == "cohere")
       cohere.init(preset.apiKey);
-      else if (preset.provider == "azure") {
-      // @ts-expect-error TODO
+    else if (preset.provider == "azure") {
       const url = preset.url;
 
       if (!preset.apiKey || !url) return;
@@ -195,8 +204,8 @@ export default class LoomPlugin extends Plugin {
   }
 
   apiKeySet() {
-	if (this.settings.modelPreset == -1) return false;
-	return this.settings.modelPresets[this.settings.modelPreset].apiKey != "";
+    if (this.settings.modelPreset == -1) return false;
+    return this.settings.modelPresets[this.settings.modelPreset].apiKey != "";
   }
 
   newNode(text: string, parentId: string | null, unread: boolean = false): [string, Node] {
@@ -209,30 +218,30 @@ export default class LoomPlugin extends Plugin {
       bookmarked: false,
       searchResultState: null,
     };
-	return [id, node];
+    return [id, node];
   }
 
   initializeNoteState(file: TFile) {
-	const [rootId, root] = this.newNode(this.editor.getValue(), null);
+    const [rootId, root] = this.newNode(this.editor.getValue(), null);
     this.state[file.path] = {
-	  current: rootId,
+      current: rootId,
       hoisted: [] as string[],
-	  searchTerm: "",
+      searchTerm: "",
       nodes: { [rootId]: root },
-	  generating: null,
+      generating: null,
     };
     this.saveAndRender();
   }
 
   ancestors(file: TFile, id: string): string[] {
     const state = this.state[file.path];
-	let ancestors = [];
-	let node: string | null = id;
-	while (node) {
-	  node = state.nodes[node].parentId;
-	  if (node) ancestors.push(node);
-	}
-	return ancestors.reverse();
+    let ancestors = [];
+    let node: string | null = id;
+    while (node) {
+      node = state.nodes[node].parentId;
+      if (node) ancestors.push(node);
+    }
+    return ancestors.reverse();
   }
 
   family(file: TFile, id: string): string[] {
@@ -240,7 +249,7 @@ export default class LoomPlugin extends Plugin {
   }
 
   fullText(file: TFile, id: string | null) {
-	const state = this.state[file.path];
+    const state = this.state[file.path];
 
     let text = "";
     let current = id;
@@ -255,8 +264,8 @@ export default class LoomPlugin extends Plugin {
     // split the current node into:
     //   - parent node with text before cursor
     //   - child node with text after cursor
-	
-	const state = this.state[file.path];
+
+    const state = this.state[file.path];
     const current = state.current;
 
     // first, get the cursor's position in the full text
@@ -274,9 +283,9 @@ export default class LoomPlugin extends Plugin {
     let n = 0;
     while (true) {
       if (i < familyTexts[n].length) break;
-	  // if the cursor is at the end of the last node, don't split, just return the current node
+      // if the cursor is at the end of the last node, don't split, just return the current node
       if (n === family.length - 1)
-		return [current, null];
+        return [current, null];
       i -= familyTexts[n].length;
       n++;
     }
@@ -297,8 +306,8 @@ export default class LoomPlugin extends Plugin {
     );
 
     // then, create a new node with the text after the cursor
-	const [childId, childNode] = this.newNode(after, parentNode);
-	this.state[file.path].nodes[childId] = childNode;
+    const [childId, childNode] = this.newNode(after, parentNode);
+    this.state[file.path].nodes[childId] = childNode;
 
     // move the children to under the after node
     children.forEach((child) => (child.parentId = childId));
@@ -313,7 +322,7 @@ export default class LoomPlugin extends Plugin {
     this.app.workspace.trigger("parse-style-settings")
     this.addSettingTab(new LoomSettingTab(this.app, this));
 
-	this.initializeProviders();
+    this.initializeProviders();
 
     this.statusBarItem = this.addStatusBarItem();
     this.statusBarItem.setText("Generating...");
@@ -323,10 +332,10 @@ export default class LoomPlugin extends Plugin {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return;
 
-	  if (!this.apiKeySet()) return false;
-	  if (!checking) callback(file);
-	  return true;
-	}
+      if (!this.apiKeySet()) return false;
+      if (!checking) callback(file);
+      return true;
+    }
 
     this.addCommand({
       id: "complete",
@@ -335,22 +344,22 @@ export default class LoomPlugin extends Plugin {
       hotkeys: [{ modifiers: ["Ctrl"], key: " " }],
     });
 
-	this.addCommand({
-	  id: "generate-siblings",
-	  name: "Generate siblings of the current node",
-	  checkCallback: (checking: boolean) => completeCallback(checking, this.generateSiblings.bind(this)),
-	  hotkeys: [{ modifiers: ["Ctrl", "Shift"], key: " " }],
-	});
+    this.addCommand({
+      id: "generate-siblings",
+      name: "Generate siblings of the current node",
+      checkCallback: (checking: boolean) => completeCallback(checking, this.generateSiblings.bind(this)),
+      hotkeys: [{ modifiers: ["Ctrl", "Shift"], key: " " }],
+    });
 
-  this.addCommand({
-    id: "bookmark",
-    name: "Bookmark current node",
-    checkCallback: (checking: boolean) =>
-      withState(checking, (state) => {
-        this.app.workspace.trigger("loom:toggle-bookmark", state.current);
-      }),
-    hotkeys: [{ modifiers: ["Ctrl"], key: "b" }],
-  });
+    this.addCommand({
+      id: "bookmark",
+      name: "Bookmark current node",
+      checkCallback: (checking: boolean) =>
+        withState(checking, (state) => {
+          this.app.workspace.trigger("loom:toggle-bookmark", state.current);
+        }),
+      hotkeys: [{ modifiers: ["Ctrl"], key: "b" }],
+    });
 
 
     const withState = (checking: boolean, callback: (state: NoteState) => void) => {
@@ -382,15 +391,15 @@ export default class LoomPlugin extends Plugin {
     };
 
     const openPane = (type: string, focus: boolean) => {
-	  const panes = this.app.workspace.getLeavesOfType(type);
-	  try {
-		if (panes.length === 0)
-		  this.app.workspace.getRightLeaf(false)?.setViewState({ type });
-	    else if (focus) this.app.workspace.revealLeaf(panes[0]);
-	  } catch (e) {} // expect "TypeError: Cannot read properties of null (reading 'children')"
-	};
+      const panes = this.app.workspace.getLeavesOfType(type);
+      try {
+        if (panes.length === 0)
+          this.app.workspace.getRightLeaf(false)?.setViewState({ type });
+        else if (focus) this.app.workspace.revealLeaf(panes[0]);
+      } catch (e) { } // expect "TypeError: Cannot read properties of null (reading 'children')"
+    };
     const openLoomPane = (focus: boolean) => openPane("loom", focus);
-	const openLoomSiblingsPane = (focus: boolean) => openPane("loom-siblings", focus);
+    const openLoomSiblingsPane = (focus: boolean) => openPane("loom-siblings", focus);
 
     this.addCommand({
       id: "create-child",
@@ -440,18 +449,18 @@ export default class LoomPlugin extends Plugin {
     });
 
     const canMerge = (state: NoteState, id: string, checking: boolean) => {
-	  const parentId = state.nodes[id].parentId;
-	  if (!parentId) {
+      const parentId = state.nodes[id].parentId;
+      if (!parentId) {
         if (!checking) new Notice("Can't merge a root node with its parent");
-		return false;
-	  }
-	  const nSiblings = Object.values(state.nodes).filter((n) => n.parentId === parentId).length;
-	  if (nSiblings > 1) {
-		if (!checking) new Notice("Can't merge this node with its parent; it has siblings");
-		return false;
-	  }
-	  return true;
-	}
+        return false;
+      }
+      const nSiblings = Object.values(state.nodes).filter((n) => n.parentId === parentId).length;
+      if (nSiblings > 1) {
+        if (!checking) new Notice("Can't merge this node with its parent; it has siblings");
+        return false;
+      }
+      return true;
+    }
 
     this.addCommand({
       id: "merge-with-parent",
@@ -466,18 +475,18 @@ export default class LoomPlugin extends Plugin {
         ),
       hotkeys: [{ modifiers: ["Alt"], key: "m" }],
     });
-	
-	const switchToSibling = (state: NoteState, delta: number) => {
-	  const parentId = state.nodes[state.current].parentId;
-	  const siblings = Object.entries(state.nodes)
-	    .filter(([, node]) => node.parentId === parentId)
-		.map(([id]) => id);
-	  
-	  if (siblings.length === 1) return;
 
-	  const index = (siblings.indexOf(state.current) + delta + siblings.length) % siblings.length;
+    const switchToSibling = (state: NoteState, delta: number) => {
+      const parentId = state.nodes[state.current].parentId;
+      const siblings = Object.entries(state.nodes)
+        .filter(([, node]) => node.parentId === parentId)
+        .map(([id]) => id);
+
+      if (siblings.length === 1) return;
+
+      const index = (siblings.indexOf(state.current) + delta + siblings.length) % siblings.length;
       this.app.workspace.trigger("loom:switch-to", siblings[index]);
-	}
+    }
 
     this.addCommand({
       id: "switch-to-next-sibling",
@@ -490,13 +499,13 @@ export default class LoomPlugin extends Plugin {
     this.addCommand({
       id: "switch-to-previous-sibling",
       name: "Switch to previous sibling",
-	  checkCallback: (checking: boolean) =>
-	    withState(checking, (state) => switchToSibling(state, -1)),
+      checkCallback: (checking: boolean) =>
+        withState(checking, (state) => switchToSibling(state, -1)),
       hotkeys: [{ modifiers: ["Alt"], key: "ArrowUp" }],
     });
 
-	const switchToParent = (state: NoteState) =>
-	  this.app.workspace.trigger("loom:switch-to", state.nodes[state.current].parentId);
+    const switchToParent = (state: NoteState) =>
+      this.app.workspace.trigger("loom:switch-to", state.nodes[state.current].parentId);
 
     this.addCommand({
       id: "switch-to-parent",
@@ -510,7 +519,7 @@ export default class LoomPlugin extends Plugin {
       hotkeys: [{ modifiers: ["Alt"], key: "ArrowLeft" }],
     });
 
-	const switchToChild = (state: NoteState) => {
+    const switchToChild = (state: NoteState) => {
       const children = Object.entries(state.nodes)
         .filter(([, node]) => node.parentId === state.current)
         .sort(
@@ -520,7 +529,7 @@ export default class LoomPlugin extends Plugin {
 
       if (children.length > 0)
         this.app.workspace.trigger("loom:switch-to", children[0][0]);
-	}
+    }
 
     this.addCommand({
       id: "switch-to-child",
@@ -530,16 +539,16 @@ export default class LoomPlugin extends Plugin {
       hotkeys: [{ modifiers: ["Alt"], key: "ArrowRight" }],
     });
 
-	const canDelete = (state: NoteState, id: string, checking: boolean) => {
-	  const rootNodes = Object.entries(state.nodes)
-	    .filter(([, node]) => node.parentId === null)
-		.map(([id]) => id);
-	  if (rootNodes.length === 1 && rootNodes[0] === id) {
-		if (!checking) new Notice("Can't delete the last root node");
-		return false;
-	  }
-	  return true;
-	}
+    const canDelete = (state: NoteState, id: string, checking: boolean) => {
+      const rootNodes = Object.entries(state.nodes)
+        .filter(([, node]) => node.parentId === null)
+        .map(([id]) => id);
+      if (rootNodes.length === 1 && rootNodes[0] === id) {
+        if (!checking) new Notice("Can't delete the last root node");
+        return false;
+      }
+      return true;
+    }
 
     this.addCommand({
       id: "delete-current-node",
@@ -586,19 +595,19 @@ export default class LoomPlugin extends Plugin {
     const getSettings = () => this.settings;
 
     this.addCommand({
-	  id: "make-prompt-from-passages",
-	  name: "Make prompt from passages",
-	  callback: () => {
-		if (this.settings.passageFolder.trim() === "") {
-		  new Notice("Please set the passage folder in settings");
-		  return;
-		}
-		new MakePromptFromPassagesModal(
+      id: "make-prompt-from-passages",
+      name: "Make prompt from passages",
+      callback: () => {
+        if (this.settings.passageFolder.trim() === "") {
+          new Notice("Please set the passage folder in settings");
+          return;
+        }
+        new MakePromptFromPassagesModal(
           this.app,
-	  	  getSettings,
-	    ).open();
-	  }
-	});
+          getSettings,
+        ).open();
+      }
+    });
 
     this.addCommand({
       id: "open-pane",
@@ -606,11 +615,11 @@ export default class LoomPlugin extends Plugin {
       callback: () => openLoomPane(true),
     });
 
-	this.addCommand({
-	  id: "open-siblings-pane",
-	  name: "Open Loom siblings pane",
-	  callback: () => openLoomSiblingsPane(true),
-	});
+    this.addCommand({
+      id: "open-siblings-pane",
+      name: "Open Loom siblings pane",
+      callback: () => openLoomSiblingsPane(true),
+    });
 
     this.addCommand({
       id: "debug-reset-state",
@@ -621,8 +630,8 @@ export default class LoomPlugin extends Plugin {
     this.addCommand({
       id: "debug-reset-hoist-stack",
       name: "Debug: Reset hoist stack",
-	  callback: () => this.wftsar((file) => (this.state[file.path].hoisted = [])),
-	});
+      callback: () => this.wftsar((file) => (this.state[file.path].hoisted = [])),
+    });
 
     this.registerView(
       "loom",
@@ -649,33 +658,33 @@ export default class LoomPlugin extends Plugin {
           // @ts-expect-error
           const editorView = editor.cm;
           const plugin = editorView.plugin(loomEditorPlugin);
-		  
+
           // get cursor position, so it can be restored later
           const cursor = editor.getCursor();
 
           // if this note has no state, initialize it and return
-		  // @ts-ignore `Object is possibly 'null'` only in github actions
+          // @ts-ignore `Object is possibly 'null'` only in github actions
           if (!this.state[view.file.path]) {
             const [current, node] = this.newNode(editor.getValue(), null);
-			// @ts-ignore
+            // @ts-ignore
             this.state[view.file.path] = {
               current,
               hoisted: [] as string[],
-			  searchTerm: "",
+              searchTerm: "",
               nodes: { [current]: node },
               generating: null,
             };
-		    return;
-		  }
+            return;
+          }
 
-		  // @ts-ignore
+          // @ts-ignore
           const current = this.state[view.file.path].current;
 
           // `ancestors`: starts with the root node, ends with the parent of the current node
           let ancestors: string[] = [];
           let node: string | null = current;
           while (node) {
-			// @ts-ignore
+            // @ts-ignore
             node = this.state[view.file.path].nodes[node].parentId;
             if (node) ancestors.push(node);
           }
@@ -684,13 +693,13 @@ export default class LoomPlugin extends Plugin {
           // `ancestorTexts`: the text of each node in `ancestors`
           const text = editor.getValue();
           const ancestorTexts = ancestors.map(
-			// @ts-ignore
+            // @ts-ignore
             (id) => this.state[view.file.path].nodes[id].text
           );
 
           // `familyTexts`: `ancestorTexts` + the current node's text
           const familyTexts = ancestorTexts.concat(
-			// @ts-ignore
+            // @ts-ignore
             this.state[view.file.path].nodes[current].text
           );
 
@@ -703,14 +712,14 @@ export default class LoomPlugin extends Plugin {
             let newText = text.substring(prefix.length);
             newText = newText.substring(0, newText.length - suffix.length);
 
-			// @ts-ignore
+            // @ts-ignore
             this.state[view.file.path].nodes[ancestors[i]].text = newText;
           };
 
           const updateDecorations = () => {
             const ancestorLengths = ancestors.map((id) => [
               id,
-			  // @ts-ignore
+              // @ts-ignore
               this.state[view.file.path].nodes[id].text.length,
             ]);
             plugin.state = { ...plugin.state, ancestorLengths };
@@ -725,7 +734,7 @@ export default class LoomPlugin extends Plugin {
               return;
             }
           }
-		  // @ts-ignore
+          // @ts-ignore
           this.state[view.file.path].nodes[current].text = text.slice(
             ancestorTexts.join("").length
           );
@@ -735,7 +744,7 @@ export default class LoomPlugin extends Plugin {
           setTimeout(() => {
             this.saveAndRender();
           }, 0);
-		  
+
           // restore cursor position
           editor.setCursor(cursor);
         }
@@ -752,45 +761,45 @@ export default class LoomPlugin extends Plugin {
           this.state[file.path].nodes[id].unread = false;
           this.state[file.path].nodes[id].lastVisited = Date.now();
 
-		  // uncollapse the node's ancestors
+          // uncollapse the node's ancestors
           const ancestors = this.family(file, id).slice(0, -1);
           ancestors.forEach(
             (id) => (this.state[file.path].nodes[id].collapsed = false)
           );
 
-		  // update the editor's text
+          // update the editor's text
           // const cursor = this.editor.getCursor();
           // const linesBefore = this.editor.getValue().split("\n");
           this.editor.setValue(this.fullText(file, id));
 
-      // always move cursor to the end of the editor
-        const line = this.editor.lineCount() - 1;
-        const ch = this.editor.getLine(line).length;
-        this.editor.setCursor({ line, ch });
-        // return;
+          // always move cursor to the end of the editor
+          const line = this.editor.lineCount() - 1;
+          const ch = this.editor.getLine(line).length;
+          this.editor.setCursor({ line, ch });
+          // return;
 
-      // // if the cursor is at the beginning of the editor, move it to the end
-      // if(cursor.line === 0 && cursor.ch === 0) {
-      //   const line = this.editor.lineCount() - 1;
-      //   const ch = this.editor.getLine(line).length;
-      //   this.editor.setCursor({ line, ch });
-      //   return;
-      // }
+          // // if the cursor is at the beginning of the editor, move it to the end
+          // if(cursor.line === 0 && cursor.ch === 0) {
+          //   const line = this.editor.lineCount() - 1;
+          //   const ch = this.editor.getLine(line).length;
+          //   this.editor.setCursor({ line, ch });
+          //   return;
+          // }
 
-		  // // if the text preceding the cursor has changed, move the cursor to the end of the text
-		  // // otherwise, restore the cursor position
-      //     const linesAfter = this.editor
-      //       .getValue()
-      //       .split("\n")
-      //       .slice(0, cursor.line + 1);
-      //     for (let i = 0; i < cursor.line; i++)
-      //       if (linesBefore[i] !== linesAfter[i]) {
-      //         const line = this.editor.lineCount() - 1;
-      //         const ch = this.editor.getLine(line).length;
-      //         this.editor.setCursor({ line, ch });
-      //               return;
-      //       }
-		  // this.editor.setCursor(cursor);
+          // // if the text preceding the cursor has changed, move the cursor to the end of the text
+          // // otherwise, restore the cursor position
+          //     const linesAfter = this.editor
+          //       .getValue()
+          //       .split("\n")
+          //       .slice(0, cursor.line + 1);
+          //     for (let i = 0; i < cursor.line; i++)
+          //       if (linesBefore[i] !== linesAfter[i]) {
+          //         const line = this.editor.lineCount() - 1;
+          //         const ch = this.editor.getLine(line).length;
+          //         this.editor.setCursor({ line, ch });
+          //               return;
+          //       }
+          // this.editor.setCursor(cursor);
         })
       )
     );
@@ -800,8 +809,8 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.on("loom:toggle-collapse", (id: string) =>
         this.wftsar(
           (file) =>
-            (this.state[file.path].nodes[id].collapsed =
-              !this.state[file.path].nodes[id].collapsed)
+          (this.state[file.path].nodes[id].collapsed =
+            !this.state[file.path].nodes[id].collapsed)
         )
       )
     );
@@ -825,8 +834,8 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.on("loom:toggle-bookmark", (id: string) =>
         this.wftsar(
           (file) =>
-            (this.state[file.path].nodes[id].bookmarked =
-              !this.state[file.path].nodes[id].bookmarked)
+          (this.state[file.path].nodes[id].bookmarked =
+            !this.state[file.path].nodes[id].bookmarked)
         )
       )
     );
@@ -835,8 +844,8 @@ export default class LoomPlugin extends Plugin {
       // @ts-expect-error
       this.app.workspace.on("loom:create-child", (id: string) =>
         this.withFile((file) => {
-		  const [newId, newNode] = this.newNode("", id);
-		  this.state[file.path].nodes[newId] = newNode;
+          const [newId, newNode] = this.newNode("", id);
+          this.state[file.path].nodes[newId] = newNode;
           this.app.workspace.trigger("loom:switch-to", newId);
         })
       )
@@ -846,8 +855,8 @@ export default class LoomPlugin extends Plugin {
       // @ts-expect-error
       this.app.workspace.on("loom:create-sibling", (id: string) =>
         this.withFile((file) => {
-		  const [newId, newNode] = this.newNode("", this.state[file.path].nodes[id].parentId);
-		  this.state[file.path].nodes[newId] = newNode;
+          const [newId, newNode] = this.newNode("", this.state[file.path].nodes[id].parentId);
+          this.state[file.path].nodes[newId] = newNode;
           this.app.workspace.trigger("loom:switch-to", newId);
         })
       )
@@ -858,8 +867,8 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.on("loom:clone", (id: string) =>
         this.withFile((file) => {
           const node = this.state[file.path].nodes[id];
-		  const [newId, newNode] = this.newNode(node.text, node.parentId);
-		  this.state[file.path].nodes[newId] = newNode;
+          const [newId, newNode] = this.newNode(node.text, node.parentId);
+          this.state[file.path].nodes[newId] = newNode;
           this.app.workspace.trigger("loom:switch-to", newId);
         })
       )
@@ -870,8 +879,8 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.on("loom:break-at-point", () =>
         this.withFile((file) => {
           const [, childId] = this.breakAtPoint(file);
-		  if (childId) this.app.workspace.trigger("loom:switch-to", childId);
-		})
+          if (childId) this.app.workspace.trigger("loom:switch-to", childId);
+        })
       )
     );
 
@@ -881,8 +890,8 @@ export default class LoomPlugin extends Plugin {
         this.withFile((file) => {
           const [parentId] = this.breakAtPoint(file);
           if (parentId !== undefined) {
-			const [newId, newNode] = this.newNode("", parentId);
-			this.state[file.path].nodes[newId] = newNode;
+            const [newId, newNode] = this.newNode("", parentId);
+            this.state[file.path].nodes[newId] = newNode;
             this.app.workspace.trigger("loom:switch-to", newId);
           }
         })
@@ -895,21 +904,21 @@ export default class LoomPlugin extends Plugin {
         this.wftsar((file) => {
           const state = this.state[file.path];
 
-		  if (!canMerge(state, id, false)) return;
+          if (!canMerge(state, id, false)) return;
 
           const parentId = state.nodes[id].parentId!;
 
-		  // update the merged node's text
+          // update the merged node's text
           state.nodes[parentId].text += state.nodes[id].text;
 
-		  // move the children to the merged node
+          // move the children to the merged node
           const children = Object.entries(state.nodes).filter(
             ([, node]) => node.parentId === id
           );
           for (const [childId] of children)
             this.state[file.path].nodes[childId].parentId = parentId;
 
-		  // switch to the merged node and delete the child node
+          // switch to the merged node and delete the child node
           this.app.workspace.trigger("loom:switch-to", parentId);
           this.app.workspace.trigger("loom:delete", [id]);
         })
@@ -920,68 +929,68 @@ export default class LoomPlugin extends Plugin {
       // @ts-expect-error
       this.app.workspace.on("loom:delete", (ids: string[]) =>
         this.wftsar((file) => {
-		  const state = this.state[file.path];
+          const state = this.state[file.path];
 
-		  ids = ids.filter((id) => canDelete(state, id, false));
-		  if (ids.length === 0) return;
+          ids = ids.filter((id) => canDelete(state, id, false));
+          if (ids.length === 0) return;
 
-		  // remove the nodes from the hoist stack
+          // remove the nodes from the hoist stack
           this.state[file.path].hoisted = state.hoisted.filter((id) => !ids.includes(id));
 
-		  // add the nodes and their descendants to a list of nodes to delete
+          // add the nodes and their descendants to a list of nodes to delete
 
-		  let deleted = [...ids];
+          let deleted = [...ids];
 
-		  const addChildren = (id: string) => {
-			const children = Object.entries(state.nodes)
-			  .filter(([, node]) => node.parentId === id)
-			  .map(([id]) => id);
-			deleted = deleted.concat(children);
-			children.forEach(addChildren);
-		  }
-		  ids.forEach(addChildren);
+          const addChildren = (id: string) => {
+            const children = Object.entries(state.nodes)
+              .filter(([, node]) => node.parentId === id)
+              .map(([id]) => id);
+            deleted = deleted.concat(children);
+            children.forEach(addChildren);
+          }
+          ids.forEach(addChildren);
 
-		  // if the current node will be deleted, switch to its next sibling or its closest ancestor
-		  if (deleted.includes(state.current)) {
+          // if the current node will be deleted, switch to its next sibling or its closest ancestor
+          if (deleted.includes(state.current)) {
             const parentId = state.nodes[state.current].parentId;
-	    	const siblings = Object.entries(state.nodes)
-	    	  .filter(([, node]) => node.parentId === parentId)
-	    	  .map(([id]) => id);
+            const siblings = Object.entries(state.nodes)
+              .filter(([, node]) => node.parentId === parentId)
+              .map(([id]) => id);
 
-			(() => {
-			  // try to switch to the next sibling
-	          if (siblings.some((id) => !deleted.includes(id))) {
-	        	const index = siblings.indexOf(state.current);
-	        	const nextSibling = siblings[(index + 1) % siblings.length];
-	        	this.app.workspace.trigger("loom:switch-to", nextSibling);
-		    	return;
-	          }
+            (() => {
+              // try to switch to the next sibling
+              if (siblings.some((id) => !deleted.includes(id))) {
+                const index = siblings.indexOf(state.current);
+                const nextSibling = siblings[(index + 1) % siblings.length];
+                this.app.workspace.trigger("loom:switch-to", nextSibling);
+                return;
+              }
 
-			  // try to switch to the closest ancestor
-			  let ancestorId = parentId;
-			  while (ancestorId !== null) {
-				if (!deleted.includes(ancestorId)) {
-				  this.app.workspace.trigger("loom:switch-to", ancestorId);
-				  return;
-				}
-				ancestorId = state.nodes[ancestorId].parentId;
-			  }
+              // try to switch to the closest ancestor
+              let ancestorId = parentId;
+              while (ancestorId !== null) {
+                if (!deleted.includes(ancestorId)) {
+                  this.app.workspace.trigger("loom:switch-to", ancestorId);
+                  return;
+                }
+                ancestorId = state.nodes[ancestorId].parentId;
+              }
 
-			  // if all else fails, switch to a root node
-			  const rootNodes = Object.entries(state.nodes)
-			    .filter(([, node]) => node.parentId === null)
-				.map(([id]) => id);
-			  for (const id of rootNodes)
-				if (!deleted.includes(id)) {
-				  this.app.workspace.trigger("loom:switch-to", id);
-				  return;
-				}
-			})();
-		  }
+              // if all else fails, switch to a root node
+              const rootNodes = Object.entries(state.nodes)
+                .filter(([, node]) => node.parentId === null)
+                .map(([id]) => id);
+              for (const id of rootNodes)
+                if (!deleted.includes(id)) {
+                  this.app.workspace.trigger("loom:switch-to", id);
+                  return;
+                }
+            })();
+          }
 
-		  // delete the nodes in the list
-		  for (const id of deleted)
-			delete this.state[file.path].nodes[id];
+          // delete the nodes in the list
+          for (const id of deleted)
+            delete this.state[file.path].nodes[id];
         })
       )
     );
@@ -991,9 +1000,9 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.on("loom:clear-children", (id: string) =>
         this.wftsar((file) => {
           const children = Object.entries(this.state[file.path].nodes)
-		    .filter(([, node]) => node.parentId === id)
-			.map(([id]) => id);
-		  this.app.workspace.trigger("loom:delete", children);
+            .filter(([, node]) => node.parentId === id)
+            .map(([id]) => id);
+          this.app.workspace.trigger("loom:delete", children);
         })
       )
     );
@@ -1004,9 +1013,9 @@ export default class LoomPlugin extends Plugin {
         this.wftsar((file) => {
           const parentId = this.state[file.path].nodes[id].parentId;
           const siblings = Object.entries(this.state[file.path].nodes)
-		    .filter(([id_, node]) => node.parentId === parentId && id_ !== id)
-			.map(([id]) => id);
-		  this.app.workspace.trigger("loom:delete", siblings);
+            .filter(([id_, node]) => node.parentId === parentId && id_ !== id)
+            .map(([id]) => id);
+          this.app.workspace.trigger("loom:delete", siblings);
         })
       )
     );
@@ -1016,10 +1025,10 @@ export default class LoomPlugin extends Plugin {
         // @ts-expect-error
         "loom:set-setting",
         (setting: string, value: any) => {
-		  this.settings = { ...this.settings, [setting]: value };
-		  this.saveAndRender();
+          this.settings = { ...this.settings, [setting]: value };
+          this.saveAndRender();
 
-		  // if changing showNodeBorders, update the editor
+          // if changing showNodeBorders, update the editor
           if (setting === "showNodeBorders") {
             // @ts-expect-error
             const editor = this.editor.cm;
@@ -1039,50 +1048,50 @@ export default class LoomPlugin extends Plugin {
         // @ts-expect-error
         "loom:set-visibility-setting",
         (setting: string, value: boolean) => {
-		  this.settings.visibility[setting] = value;
-		  this.saveAndRender();
-		}
-	  )
-	);
+          this.settings.visibility[setting] = value;
+          this.saveAndRender();
+        }
+      )
+    );
 
-	this.registerEvent(
-	  // @ts-expect-error
-	  this.app.workspace.on("loom:search", (term: string) => this.withFile((file) => {
-		const state = this.state[file.path];
+    this.registerEvent(
+      // @ts-expect-error
+      this.app.workspace.on("loom:search", (term: string) => this.withFile((file) => {
+        const state = this.state[file.path];
 
         this.state[file.path].searchTerm = term;
-		if (!term) {
-		  Object.keys(state.nodes).forEach((id) => {
-		    this.state[file.path].nodes[id].searchResultState = null;
-		  });
-		  this.save(); // don't re-render
-		  return;
-		}
+        if (!term) {
+          Object.keys(state.nodes).forEach((id) => {
+            this.state[file.path].nodes[id].searchResultState = null;
+          });
+          this.save(); // don't re-render
+          return;
+        }
 
-		const matches = Object.entries(state.nodes)
-		  .filter(([, node]) => node.text.toLowerCase().includes(term.toLowerCase()))
-		  .map(([id]) => id);
+        const matches = Object.entries(state.nodes)
+          .filter(([, node]) => node.text.toLowerCase().includes(term.toLowerCase()))
+          .map(([id]) => id);
 
-		let ancestors: string[] = [];
-		for (const id of matches) {
-		  let parentId = state.nodes[id].parentId;
-		  while (parentId !== null) {
-			ancestors.push(parentId);
-			parentId = state.nodes[parentId].parentId;
-		  }
-		}
+        let ancestors: string[] = [];
+        for (const id of matches) {
+          let parentId = state.nodes[id].parentId;
+          while (parentId !== null) {
+            ancestors.push(parentId);
+            parentId = state.nodes[parentId].parentId;
+          }
+        }
 
-		Object.keys(state.nodes).forEach((id) => {
-		  let searchResultState: SearchResultState;
-		  if (matches.includes(id)) searchResultState = "result";
-		  else if (ancestors.includes(id)) searchResultState = "ancestor";
-		  else searchResultState = "none";
-		  this.state[file.path].nodes[id].searchResultState = searchResultState;
-		});
+        Object.keys(state.nodes).forEach((id) => {
+          let searchResultState: SearchResultState;
+          if (matches.includes(id)) searchResultState = "result";
+          else if (ancestors.includes(id)) searchResultState = "ancestor";
+          else searchResultState = "none";
+          this.state[file.path].nodes[id].searchResultState = searchResultState;
+        });
 
-		this.save();
-	  }))
-	);
+        this.save();
+      }))
+    );
 
     this.registerEvent(
       // @ts-expect-error
@@ -1111,72 +1120,72 @@ export default class LoomPlugin extends Plugin {
       )
     );
 
-	this.registerEvent(
-	  this.app.workspace.on(
-	    // @ts-expect-error
-		"loom:make-prompt-from-passages",
-		(
-		  passages: string[],
-		  rawSeparator: string,
-		  rawFrontmatter: string,
-		) => this.wftsar((file) => {
+    this.registerEvent(
+      this.app.workspace.on(
+        // @ts-expect-error
+        "loom:make-prompt-from-passages",
+        (
+          passages: string[],
+          rawSeparator: string,
+          rawFrontmatter: string,
+        ) => this.wftsar((file) => {
           const separator = rawSeparator.replace(/\\n/g, "\n");
-		  const frontmatter = (index: number) => rawFrontmatter
-		    .replace(/%n/g, (index + 1).toString())
-			.replace(/%r/g, toRoman(index + 1))
-			.replace(/\\n/g, "\n");
+          const frontmatter = (index: number) => rawFrontmatter
+            .replace(/%n/g, (index + 1).toString())
+            .replace(/%r/g, toRoman(index + 1))
+            .replace(/\\n/g, "\n");
 
-		  const passageTexts = passages.map((passage, index) => {
-			return Object.entries(this.state[passage].nodes)
-			  .filter(([, node]) => node.parentId === null)
-			  .map(([, node]) => frontmatter(index) + node.text);
-		  });
-		  const text = `${passageTexts.join(separator)}${separator}${frontmatter(passages.length)}`;
+          const passageTexts = passages.map((passage, index) => {
+            return Object.entries(this.state[passage].nodes)
+              .filter(([, node]) => node.parentId === null)
+              .map(([, node]) => frontmatter(index) + node.text);
+          });
+          const text = `${passageTexts.join(separator)}${separator}${frontmatter(passages.length)}`;
 
-		  const state = this.state[file.path];
-		  const currentNode = state.nodes[state.current];
+          const state = this.state[file.path];
+          const currentNode = state.nodes[state.current];
 
-		  let id;
-		  if (currentNode.text === "" && currentNode.parentId === null) {
-			this.state[file.path].nodes[state.current].text = text;
-			id = state.current;
-		  } else {
-	        const [newId, newNode] = this.newNode(text, null);
-			this.state[file.path].nodes[newId] = newNode;
-			id = newId;
-		  }
+          let id;
+          if (currentNode.text === "" && currentNode.parentId === null) {
+            this.state[file.path].nodes[state.current].text = text;
+            id = state.current;
+          } else {
+            const [newId, newNode] = this.newNode(text, null);
+            this.state[file.path].nodes[newId] = newNode;
+            id = newId;
+          }
 
-		  this.app.workspace.trigger("loom:switch-to", id);
-		})
-	  )
-	);
+          this.app.workspace.trigger("loom:switch-to", id);
+        })
+      )
+    );
 
     const onFileOpen = (file: TFile) => {
       if (file.extension !== "md") return;
 
-	  // if this file is new, initialize its state
+      // if this file is new, initialize its state
       if (!this.state[file.path])
         this.initializeNoteState(file);
 
       const state = this.state[file.path];
 
-	  // find this file's `MarkdownView`, then set `this.editor` to its editor
+      // find this file's `MarkdownView`, then set `this.editor` to its editor
       this.app.workspace.iterateRootLeaves((leaf) => {
         if (
           leaf.view instanceof MarkdownView &&
-		  // @ts-ignore
+          // @ts-ignore
           leaf.view.file.path === file.path
         )
           this.editor = leaf.view.editor;
       });
 
-	  // get the length of each ancestor's text,
-	  // which will be passed to `LoomEditorPlugin` to mark ancestor nodes in the editor
+      // get the length of each ancestor's text,
+      // which will be passed to `LoomEditorPlugin` to mark ancestor nodes in the editor
       const ancestors = this.ancestors(file, state.current);
       const ancestorLengths = ancestors.map((id) =>
-	    [id, state.nodes[id].text.length]);
+        [id, state.nodes[id].text.length]);
 
-	  // set `LoomEditorPlugin`'s state, then refresh it
+      // set `LoomEditorPlugin`'s state, then refresh it
       // @ts-expect-error
       const plugin = this.editor.cm.plugin(loomEditorPlugin);
       plugin.state = {
@@ -1187,7 +1196,7 @@ export default class LoomPlugin extends Plugin {
 
       this.renderLoomViews();
       this.renderLoomSiblingsViews();
-	}
+    }
 
     this.registerEvent(
       this.app.workspace.on("file-open", (file) => file && onFileOpen(file))
@@ -1227,106 +1236,108 @@ export default class LoomPlugin extends Plugin {
       this.app.workspace.iterateRootLeaves((leaf) => {
         if (
           leaf.view instanceof MarkdownView &&
-		  // @ts-ignore
+          // @ts-ignore
           leaf.view.file.path === file.path
         )
           this.editor = leaf.view.editor;
-		onFileOpen(file);
+        onFileOpen(file);
       })
     );
   }
 
   async complete(file: TFile) {
-	const state = this.state[file.path];
-	const [parentNode] = this.breakAtPoint(file);
+    const state = this.state[file.path];
+    const [parentNode] = this.breakAtPoint(file);
     // switch to the parent node
     this.app.workspace.trigger("loom:switch-to", parentNode);
-	this.saveAndRender();
+    this.saveAndRender();
 
-	await this.generate(file, state.current);
+    await this.generate(file, state.current);
   }
 
   async generateSiblings(file: TFile) {
-	const state = this.state[file.path];
-	await this.generate(file, state.nodes[state.current].parentId);
+    const state = this.state[file.path];
+    await this.generate(file, state.nodes[state.current].parentId);
   }
 
   async generate(file: TFile, rootNode: string | null) {
-	// show the "Generating..." indicator in the status bar
-	this.statusBarItem.style.display = "inline-flex";
+    // show the "Generating..." indicator in the status bar
+    this.statusBarItem.style.display = "inline-flex";
 
     const state = this.state[file.path];
-	
-	this.state[file.path].generating = rootNode;
 
-	// show the "Generating..." indicator in the loom view
-	this.renderLoomViews();
+    this.state[file.path].generating = rootNode;
+
+    // show the "Generating..." indicator in the loom view
+    this.renderLoomViews();
 
     let prompt = `${this.settings.prepend}${this.fullText(file, rootNode)}`;
 
-	
+
     // remove a trailing space if there is one
     // store whether there was, so it can be added back post-completion
-    const trailingSpace = prompt.match(/\s+$/);
-	prompt = prompt.replace(/\s+$/, "");
-	
+    // const trailingSpace = prompt.match(/\s+$/);
+    const trailingSpace = '';
+    // prompt = prompt.replace(/\s+$/, "");
+
     // replace "\<" with "<", because obsidian tries to render html tags
-	// and "\[" with "["
+    // and "\[" with "["
     prompt = prompt.replace(/\\</g, "<").replace(/\\\[/g, "[");
 
-	// the tokenization and completion depend on the provider,
-	// so call a different method depending on the provider
+    // the tokenization and completion depend on the provider,
+    // so call a different method depending on the provider
 
-  // console.log("prompt", prompt);
+    // console.log("prompt", prompt);
 
-	const completionMethods: Record<Provider, (prompt: string) => Promise<CompletionResult>> = {
-	  cohere: this.completeCohere,
-	  textsynth: this.completeTextSynth,
-    ocp: this.completeOCP,
-	  openai: this.completeOpenAI,
-	  "openai-chat": this.completeOpenAIChat,
-	  azure: this.completeAzure,
-	  "azure-chat": this.completeAzureChat,
-    anthropic: this.completeAnthropic,
-	};
-	let result;
-	try {
-    result = await completionMethods[getPreset(this.settings).provider].bind(this)(prompt);
-	} catch (e) {
-	  new Notice(`Error: ${e}`);
-    this.state[file.path].generating = null;
-    this.saveAndRender();
-    this.statusBarItem.style.display = "none";
+    const completionMethods: Record<Provider, (prompt: string) => Promise<CompletionResult>> = {
+      cohere: this.completeCohere,
+      textsynth: this.completeTextSynth,
+      together: this.completeTogether,
+      ocp: this.completeOCP,
+      openai: this.completeOpenAI,
+      "openai-chat": this.completeOpenAIChat,
+      azure: this.completeAzure,
+      "azure-chat": this.completeAzureChat,
+      anthropic: this.completeAnthropic,
+    };
+    let result;
+    try {
+      result = await completionMethods[getPreset(this.settings).provider].bind(this)(prompt);
+    } catch (e) {
+      new Notice(`Error: ${e}`);
+      this.state[file.path].generating = null;
+      this.saveAndRender();
+      this.statusBarItem.style.display = "none";
 
-	  return;
-	}
-	if (!result.ok) {
-	  new Notice(`Error ${result.status}: ${result.message}`);
-    this.state[file.path].generating = null;
-    this.saveAndRender();
-    this.statusBarItem.style.display = "none";
+      return;
+    }
+    if (!result.ok) {
+      new Notice(`Error ${result.status}: ${result.message}`);
+      this.state[file.path].generating = null;
+      this.saveAndRender();
+      this.statusBarItem.style.display = "none";
 
-	  return;
-	}
-	const rawCompletions = result.completions;
+      return;
+    }
+    const rawCompletions = result.completions;
 
-  // console.log("rawCompletions", rawCompletions);
+    // console.log("rawCompletions", rawCompletions);
 
-	// escape and clean up the completions
-	const completions = rawCompletions.map((completion: string) => {
+    // escape and clean up the completions
+    const completions = rawCompletions.map((completion: string) => {
       if (!completion) completion = ""; // empty completions are null, apparently
       completion = completion.replace(/</g, "\\<"); // escape < for obsidian
-	  completion = completion.replace(/\[/g, "\\["); // escape [ for obsidian
+      completion = completion.replace(/\[/g, "\\["); // escape [ for obsidian
 
-	  // if using a chat provider, always separate the prompt and completion with a space
-	  // otherwise, deduplicate adjacent spaces between the prompt and completion
+      // if using a chat provider, always separate the prompt and completion with a space
+      // otherwise, deduplicate adjacent spaces between the prompt and completion
       if (["azure-chat", "openai-chat"].includes(getPreset(this.settings).provider)) {
         if (!trailingSpace) completion = " " + completion;
       } else if (trailingSpace && completion[0] === " ")
         completion = completion.slice(1);
 
-	  return completion;
-	});
+      return completion;
+    });
 
     // create a child of the current node for each completion
     let ids = [];
@@ -1354,8 +1365,8 @@ export default class LoomPlugin extends Plugin {
   }
 
   async completeCohere(prompt: string) {
-	const tokens = (await cohere.tokenize({ text: prompt })).body.token_strings;
-	prompt = tokens.slice(-getPreset(this.settings).contextLength).join("");
+    const tokens = (await cohere.tokenize({ text: prompt })).body.token_strings;
+    prompt = tokens.slice(-getPreset(this.settings).contextLength).join("");
 
     const response = await cohere.generate({
       model: getPreset(this.settings).model,
@@ -1364,184 +1375,209 @@ export default class LoomPlugin extends Plugin {
       num_generations: this.settings.n,
       temperature: this.settings.temperature,
       p: this.settings.topP,
-	  frequency_penalty: this.settings.frequencyPenalty,
-	  presence_penalty: this.settings.presencePenalty,
+      frequency_penalty: this.settings.frequencyPenalty,
+      presence_penalty: this.settings.presencePenalty,
     });
 
-	const result: CompletionResult = response.statusCode === 200
-	  ? { ok: true, completions: response.body.generations.map((generation) => generation.text) }
-	  // @ts-expect-error
-	  : { ok: false, status: response.statusCode!, message: response.body.message };
-	return result;
+    const result: CompletionResult = response.statusCode === 200
+      ? { ok: true, completions: response.body.generations.map((generation) => generation.text) }
+      // @ts-expect-error
+      : { ok: false, status: response.statusCode!, message: response.body.message };
+    return result;
   }
 
   async completeTextSynth(prompt: string) {
-	const response = await requestUrl({
+    const response = await requestUrl({
       url: `https://api.textsynth.com/v1/engines/${getPreset(this.settings).model}/completions`,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${getPreset(this.settings).apiKey}`,
       },
-	  throw: false,
+      throw: false,
       body: JSON.stringify({
         prompt,
         max_tokens: this.settings.maxTokens,
         best_of: this.settings.bestOf,
-		n: this.settings.n,
+        n: this.settings.n,
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
-	    frequency_penalty: this.settings.frequencyPenalty,
-	    presence_penalty: this.settings.presencePenalty,
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
       }),
-	});
+    });
 
-	let result: CompletionResult;
-	if (response.status === 200) {
-	  const completions = this.settings.n === 1 ? [response.json.text] : response.json.text;
-	  result = { ok: true, completions };
-	} else {
-	  result = { ok: false, status: response.status, message: response.json.error };
-	}
-	return result;
+    let result: CompletionResult;
+    if (response.status === 200) {
+      const completions = this.settings.n === 1 ? [response.json.text] : response.json.text;
+      result = { ok: true, completions };
+    } else {
+      result = { ok: false, status: response.status, message: response.json.error };
+    }
+    return result;
   }
 
   trimOpenAIPrompt(prompt: string) {
     const cl100kModels = ["gpt-4-32k", "gpt-4-0314", "gpt-4-32k-0314", "gpt-3.5-turbo", "gpt-3.5-turbo-0301", "gpt-4-base"];
-	const p50kModels = ["text-davinci-003", "text-davinci-002", "code-davinci-002", "code-davinci-001", "code-cushman-002", "code-cushman-001", "davinci-codex", "cushman-codex"];
-	// const r50kModels = ["text-davinci-001", "text-curie-001", "text-babbage-001", "text-ada-001", "davinci", "curie", "babbage", "ada"];
+    const p50kModels = ["text-davinci-003", "text-davinci-002", "code-davinci-002", "code-davinci-001", "code-cushman-002", "code-cushman-001", "davinci-codex", "cushman-codex"];
+    // const r50kModels = ["text-davinci-001", "text-curie-001", "text-babbage-001", "text-ada-001", "davinci", "curie", "babbage", "ada"];
 
-	let tokenizer;
-	if (cl100kModels.includes(getPreset(this.settings).model)) tokenizer = cl100k;
-	else if (p50kModels.includes(getPreset(this.settings).model)) tokenizer = p50k;
+    let tokenizer;
+    if (cl100kModels.includes(getPreset(this.settings).model)) tokenizer = cl100k;
+    else if (p50kModels.includes(getPreset(this.settings).model)) tokenizer = p50k;
     else tokenizer = r50k; // i expect that an unknown model will most likely be r50k
 
-	return tokenizer.decode(tokenizer.encode(prompt, { disallowedSpecial: new Set() }).slice(-(getPreset(this.settings).contextLength - this.settings.maxTokens)));
+    return tokenizer.decode(tokenizer.encode(prompt, { disallowedSpecial: new Set() }).slice(-(getPreset(this.settings).contextLength - this.settings.maxTokens)));
   }
 
   async completeOCP(prompt: string) {
-	prompt = this.trimOpenAIPrompt(prompt);
+    prompt = this.trimOpenAIPrompt(prompt);
 
-	// @ts-expect-error TODO
-    let url = getPreset(this.settings).url;
+    let url = getPreset(this.settings).url!;
 
     if (!(url.startsWith("http://") || url.startsWith("https://")))
       url = "https://" + url;
     if (!url.endsWith("/")) url += "/";
-	url = url.replace(/v1\//, "");
+    url = url.replace(/v1\//, "");
     url += "v1/completions";
 
     const response = await requestUrl({
-	  url,
+      url,
       method: "POST",
       headers: {
         Authorization: `Bearer ${getPreset(this.settings).apiKey}`,
         "Content-Type": "application/json",
       },
-	  throw: false,
+      throw: false,
       body: JSON.stringify({
         prompt,
         max_tokens: this.settings.maxTokens,
         n: this.settings.n,
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
-	    frequency_penalty: this.settings.frequencyPenalty,
-	    presence_penalty: this.settings.presencePenalty,
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
       }),
     });
 
-	const result: CompletionResult = response.status === 200
-	  ? { ok: true, completions: response.json.choices.map((choice: any) => choice.text) }
-	  : { ok: false, status: response.status, message: "" };
-	return result;
+    const result: CompletionResult = response.status === 200
+      ? { ok: true, completions: response.json.choices.map((choice: any) => choice.text) }
+      : { ok: false, status: response.status, message: "" };
+    return result;
+  }
+
+  async completeTogether(
+    prompt: string
+  ): Promise<CompletionResult> {
+    try {
+      console.info("In completeTogether!")
+      const response = await this.together.completions.create({
+        prompt,
+        model: getPreset(this.settings).model,
+        max_tokens: this.settings.maxTokens,
+        n: this.settings.n,
+        temperature: this.settings.temperature,
+        top_p: this.settings.topP,
+        top_k: this.settings.bestOf,
+        repetition_penalty: 1.0,
+//        presence_penalty: this.settings.presencePenalty,
+//        frequency_penalty: this.settings.frequencyPenalty
+      });
+      const completions = response.choices.map((choice) => choice.text!);
+      return { ok: true, completions };
+    } catch (error) {
+      console.error("Together AI completion error:", error);
+      return { ok: false, status: error.status, message: error.message };
+    }
   }
 
   async completeOpenAI(prompt: string) {
-	prompt = this.trimOpenAIPrompt(prompt);
-	let result: CompletionResult;
-	try {
-	  const response = await this.openai.createCompletion({
+    prompt = this.trimOpenAIPrompt(prompt);
+    let result: CompletionResult;
+    try {
+      const response = await this.openai.createCompletion({
         model: getPreset(this.settings).model,
         prompt,
         max_tokens: this.settings.maxTokens,
         n: this.settings.n,
         temperature: this.settings.temperature,
+        best_of: this.settings.bestOf,
         top_p: this.settings.topP,
-	    frequency_penalty: this.settings.frequencyPenalty,
-	    presence_penalty: this.settings.presencePenalty,
-	  });
-	  result = { ok: true, completions: response.data.choices.map((choice) => choice.text || "") };
-	} catch (e) {
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
+      });
+      result = { ok: true, completions: response.data.choices.map((choice) => choice.text || "") };
+    } catch (e) {
       result = { ok: false, status: e.response.status, message: e.response.data.error.message };
-	}
-	return result;
+    }
+    return result;
   }
 
   async completeOpenAIChat(prompt: string) {
-	prompt = this.trimOpenAIPrompt(prompt);
-	let result: CompletionResult;
-	try {
-	  const response = await this.openai.createChatCompletion({
+    prompt = this.trimOpenAIPrompt(prompt);
+    let result: CompletionResult;
+    try {
+      const response = await this.openai.createChatCompletion({
         model: getPreset(this.settings).model,
         messages: [{ role: "assistant", content: prompt }],
         max_tokens: this.settings.maxTokens,
         n: this.settings.n,
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
-	    frequency_penalty: this.settings.frequencyPenalty,
-	    presence_penalty: this.settings.presencePenalty,
-	  });
-	  result = { ok: true, completions: response.data.choices.map((choice) => choice.message?.content || "") };
-	} catch (e) {
-	  result = { ok: false, status: e.response.status, message: e.response.data.error.message };
-	}
-	return result;
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
+      });
+      result = { ok: true, completions: response.data.choices.map((choice) => choice.message?.content || "") };
+    } catch (e) {
+      result = { ok: false, status: e.response.status, message: e.response.data.error.message };
+    }
+    return result;
   }
 
   async completeAzure(prompt: string) {
-	prompt = this.trimOpenAIPrompt(prompt);
-	let result: CompletionResult;
-	try {
-	  const response = await this.azure.createCompletion({
+    prompt = this.trimOpenAIPrompt(prompt);
+    let result: CompletionResult;
+    try {
+      const response = await this.azure.createCompletion({
         model: getPreset(this.settings).model,
         prompt,
         max_tokens: this.settings.maxTokens,
         n: this.settings.n,
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
-	    frequency_penalty: this.settings.frequencyPenalty,
-	    presence_penalty: this.settings.presencePenalty,
-	  });
-	  result = { ok: true, completions: response.data.choices.map((choice) => choice.text || "") };
-	} catch (e) {
-	  result = { ok: false, status: e.response.status, message: e.response.data.error.message };
-	}
-	return result;
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
+      });
+      result = { ok: true, completions: response.data.choices.map((choice) => choice.text || "") };
+    } catch (e) {
+      result = { ok: false, status: e.response.status, message: e.response.data.error.message };
+    }
+    return result;
   }
 
   async completeAzureChat(prompt: string) {
-	prompt = this.trimOpenAIPrompt(prompt);
-	let result: CompletionResult;
-	try {
-	  const response = await this.azure.createChatCompletion({
+    prompt = this.trimOpenAIPrompt(prompt);
+    let result: CompletionResult;
+    try {
+      const response = await this.azure.createChatCompletion({
         model: getPreset(this.settings).model,
         messages: [{ role: "assistant", content: prompt }],
         max_tokens: this.settings.maxTokens,
         n: this.settings.n,
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
-	      frequency_penalty: this.settings.frequencyPenalty,
-	      presence_penalty: this.settings.presencePenalty,
-	  });
-	  result = { ok: true, completions: response.data.choices.map((choice) => choice.message?.content || "") };
-	} catch (e) {
-	  result = { ok: false, status: e.response.status, message: e.response.data.error.message };
-	}
-	return result;
+        frequency_penalty: this.settings.frequencyPenalty,
+        presence_penalty: this.settings.presencePenalty,
+      });
+      result = { ok: true, completions: response.data.choices.map((choice) => choice.message?.content || "") };
+    } catch (e) {
+      result = { ok: false, status: e.response.status, message: e.response.data.error.message };
+    }
+    return result;
   }
 
   async completeAnthropic(prompt: string) {
-    const completions = await Promise.all([...Array(this.settings.n).keys()].map(async () => { return await this.getAnthropicResponse(prompt);} ));
+    const completions = await Promise.all([...Array(this.settings.n).keys()].map(async () => { return await this.getAnthropicResponse(prompt); }));
 
     const result: CompletionResult = { ok: true, completions };
     return result;
@@ -1556,11 +1592,11 @@ export default class LoomPlugin extends Plugin {
       temperature: this.settings.temperature,
       system: this.settings.systemPrompt,
       messages: [
-        {"role": "user", "content": `${this.settings.userMessage}`},
-        {"role": "assistant", "content": `${prompt}`}
+        { "role": "user", "content": `${this.settings.userMessage}` },
+        { "role": "assistant", "content": `${prompt}` }
       ],
     }, null, 2);
-    if(this.settings.logApiCalls) {
+    if (this.settings.logApiCalls) {
       console.log(`request body: ${body}`);
     }
     try {
@@ -1575,17 +1611,17 @@ export default class LoomPlugin extends Plugin {
         body,
       });
 
-      if(response.status !== 200) {
+      if (response.status !== 200) {
         console.error("response", response);
         return null;
       }
-      
+
       const result = response.json.content[0]?.text || "<no text>";
 
-        // ? { ok: true, completions: [response.json.content[0]?.text || "<no text>"] }
-        // : { ok: false, status: response.status, message: "" };
+      // ? { ok: true, completions: [response.json.content[0]?.text || "<no text>"] }
+      // : { ok: false, status: response.status, message: "" };
 
-      if(this.settings.logApiCalls) {
+      if (this.settings.logApiCalls) {
         console.log(result);
       }
 
@@ -1644,343 +1680,352 @@ class LoomSettingTab extends PluginSettingTab {
     method2.createEl("kbd", { text: "Loom: Open Loom pane" });
     method2.createEl("span", { text: " command." });
 
-	const presetHeader = containerEl.createDiv({ cls: "setting-item setting-item-heading" });
-	presetHeader.createDiv({ cls: "setting-item-name", text: "Presets" });
+    const presetHeader = containerEl.createDiv({ cls: "setting-item setting-item-heading" });
+    presetHeader.createDiv({ cls: "setting-item-name", text: "Presets" });
 
-	const presetEditor = containerEl.createDiv({ cls: "loom__preset-editor setting-item" });
-	
-	const presetList = presetEditor.createDiv({ cls: "loom__preset-list" });
+    const presetEditor = containerEl.createDiv({ cls: "loom__preset-editor setting-item" });
 
-	const selectPreset = (index: number) => {
-	  this.plugin.settings.modelPreset = index;
-	  this.plugin.save();
-	  updatePresetFields();
-	  updatePresetList();
-	};
+    const presetList = presetEditor.createDiv({ cls: "loom__preset-list" });
+
+    const selectPreset = (index: number) => {
+      this.plugin.settings.modelPreset = index;
+      this.plugin.save();
+      updatePresetFields();
+      updatePresetList();
+    };
 
     const deletePreset = (index: number) => {
-	  this.plugin.settings.modelPresets.splice(index, 1);
-	  this.plugin.save();
+      this.plugin.settings.modelPresets.splice(index, 1);
+      this.plugin.save();
 
-	  if (index === this.plugin.settings.modelPreset) {
-	    if (this.plugin.settings.modelPresets.length === 0) selectPreset(-1);
-		else if (index === this.plugin.settings.modelPresets.length) selectPreset(index - 1);
-		else selectPreset(index);
-	  }
-	};
+      if (index === this.plugin.settings.modelPreset) {
+        if (this.plugin.settings.modelPresets.length === 0) selectPreset(-1);
+        else if (index === this.plugin.settings.modelPresets.length) selectPreset(index - 1);
+        else selectPreset(index);
+      }
+    };
 
     const createPreset = (preset: ModelPreset<Provider>) => {
       this.plugin.settings.modelPresets.push(preset);
-	  this.plugin.save();
-	  selectPreset(this.plugin.settings.modelPresets.length - 1);
-	}
-
-	const newPresetButtons = presetEditor.createDiv({ cls: "loom__new-preset-buttons" });
-
-	const newPresetButton = newPresetButtons.createEl("button", { text: "New preset" });
-	newPresetButton.addEventListener("click", () => {
-		const newPreset: ModelPreset<"openai"> = {
-		  name: "New preset",
-		  provider: "openai",
-		  model: "davinci-002",
-		  contextLength: 16384,
-		  apiKey: "",
-		  organization: "",
-		};
-		createPreset(newPreset);
-	  },
-	);
-
-	const fillInModelDropdown = newPresetButtons.createEl("select", { cls: "loom__new-preset-button dropdown" });
-	fillInModelDropdown.createEl("option", {
-	  text: "Fill in model details...",
-	  attr: { value: "none", selected: "", disabled: "" },
-	});
-
-	fillInModelDropdown.createEl("option", { text: "davinci-002", attr: { value: "davinci-002" } });
-	fillInModelDropdown.createEl("option", { text: "code-davinci-002", attr: { value: "code-davinci-002" } });
-	fillInModelDropdown.createEl("option", { text: "code-davinci-002 (Proxy)", attr: { value: "code-davinci-002-proxy" } });
-	fillInModelDropdown.createEl("option", { text: "gpt-4-base", attr: { value: "gpt-4-base" } });
-  fillInModelDropdown.createEl("option", { text: "claude-3-opus", attr: { value: "claude-3-opus" } });
-
-	fillInModelDropdown.addEventListener("change", (event) => {
-	  const value = (event.target as HTMLSelectElement).value;
-	  switch (value) {
-		case "davinci-002": {
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "davinci-002";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 16384;
-		  break;
-		}
-		case "code-davinci-002": {
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "code-davinci-002";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8001;
-		  break;
-		}
-		case "code-davinci-002-proxy": {
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "ocp";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "code-davinci-002";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8001;
-		  break;
-		}
-		case "gpt-4-base": {
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "gpt-4-base";
-		  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8192;
-		  break;
-		}
-    case "claude-3-opus": {
-      this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "anthropic";
-      this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "claude-3-opus-20240229";
-      this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 20000;
-      break;
+      this.plugin.save();
+      selectPreset(this.plugin.settings.modelPresets.length - 1);
     }
-	  }
-	  this.plugin.save();
-	  updatePresetFields();
 
-	  fillInModelDropdown.value = "none";
-	});
+    const newPresetButtons = presetEditor.createDiv({ cls: "loom__new-preset-buttons" });
 
-	const restoreApiKeyDropdown = newPresetButtons.createEl("select", { cls: "loom__new-preset-button dropdown" });
-	restoreApiKeyDropdown.createEl("option", {
-	  text: "Restore API key from pre-1.19...",
-	  attr: { value: "none", selected: "", disabled: "" },
-	});
-
-	restoreApiKeyDropdown.createEl("option", { text: "OpenAI", attr: { value: "openai" } });
-	restoreApiKeyDropdown.createEl("option", { text: "OpenAI code-davinci-002 Proxy", attr: { value: "ocp" } });
-	restoreApiKeyDropdown.createEl("option", { text: "Cohere", attr: { value: "cohere" } });
-	restoreApiKeyDropdown.createEl("option", { text: "TextSynth", attr: { value: "textsynth" } });
-	restoreApiKeyDropdown.createEl("option", { text: "Azure", attr: { value: "azure" } });
-  restoreApiKeyDropdown.createEl("option", { text: "Anthropic", attr: { value: "anthropic" } });
-
-	restoreApiKeyDropdown.addEventListener("change", (event) => {
-	  const provider = (event.target as HTMLSelectElement).value as Provider;
-	  let preset = { name: "New preset", provider, model: "", contextLength: "" };
-	  switch (provider) {
-		case "openai": {
-		  preset = {
-			...preset,
-		    // @ts-expect-error
-			apiKey: this.plugin.settings.openaiApiKey || "",
-		    // @ts-expect-error
-			organization: this.plugin.settings.openaiOrganization || "",
-		  };
-		  break;
-		}
-		case "ocp": {
-		  preset = {
-			...preset,
-			// @ts-expect-error
-			apiKey: this.plugin.settings.ocpApiKey || "",
-			// @ts-expect-error
-			url: this.plugin.settings.ocpUrl || "",
-		  };
-		  break;
-		}
-		case "cohere": {
-		  preset = {
-			...preset,
-			// @ts-expect-error
-			apiKey: this.plugin.settings.cohereApiKey || "",
-		  };
-		  break;
-		}
-		case "textsynth": {
-		  preset = {
-			...preset,
-			// @ts-expect-error
-			apiKey: this.plugin.settings.textsynthApiKey || "",
-		  };
-		  break;
-		}
-		case "azure": {
-		  preset = {
-			...preset,
-			// @ts-expect-error
-			apiKey: this.plugin.settings.azureApiKey || "",
-			// @ts-expect-error
-			endpoint: this.plugin.settings.azureEndpoint || "",
-		  };
-		  break;
-		}
-    case "anthropic": {
-      preset = {
-        ...preset,
-        // @ts-expect-error
-        apiKey: this.plugin.settings.anthropicApiKey || "",
-        // // @ts-expect-error
-        // systemPrompt: this.plugin.settings.anthropicSystemPrompt || "",
-        // // @ts-expect-error
-        // userMessage: this.plugin.settings.anthropicUserMessage || "",
+    const newPresetButton = newPresetButtons.createEl("button", { text: "New preset" });
+    newPresetButton.addEventListener("click", () => {
+      const newPreset: ModelPreset<"openai"> = {
+        name: "New preset",
+        provider: "openai",
+        model: "davinci-002",
+        contextLength: 16384,
+        apiKey: "",
+        organization: "",
       };
-      break;
-    }
-		default: {
-		  throw new Error(`Unknown provider: ${provider}`);
-		}
-	  }
-	  // @ts-expect-error TODO
+      createPreset(newPreset);
+    },
+    );
+
+    const fillInModelDropdown = newPresetButtons.createEl("select", { cls: "loom__new-preset-button dropdown" });
+    fillInModelDropdown.createEl("option", {
+      text: "Fill in model details...",
+      attr: { value: "none", selected: "", disabled: "" },
+    });
+
+    fillInModelDropdown.createEl("option", { text: "davinci-002", attr: { value: "davinci-002" } });
+    fillInModelDropdown.createEl("option", { text: "code-davinci-002", attr: { value: "code-davinci-002" } });
+    fillInModelDropdown.createEl("option", { text: "code-davinci-002 (Proxy)", attr: { value: "code-davinci-002-proxy" } });
+    fillInModelDropdown.createEl("option", { text: "gpt-4-base", attr: { value: "gpt-4-base" } });
+    fillInModelDropdown.createEl("option", { text: "claude-3-opus", attr: { value: "claude-3-opus" } });
+
+    fillInModelDropdown.addEventListener("change", (event) => {
+      const value = (event.target as HTMLSelectElement).value;
+      switch (value) {
+        case "davinci-002": {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "davinci-002";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 16384;
+          break;
+        }
+        case "code-davinci-002": {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "code-davinci-002";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8001;
+          break;
+        }
+        case "code-davinci-002-proxy": {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "ocp";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "code-davinci-002";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8001;
+          break;
+        }
+        case "gpt-4-base": {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "openai";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "gpt-4-base";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 8192;
+          break;
+        }
+        case "claude-3-opus": {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = "anthropic";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = "claude-3-opus-20240229";
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = 20000;
+          break;
+        }
+      }
+      this.plugin.save();
+      updatePresetFields();
+
+      fillInModelDropdown.value = "none";
+    });
+
+    const restoreApiKeyDropdown = newPresetButtons.createEl("select", { cls: "loom__new-preset-button dropdown" });
+    restoreApiKeyDropdown.createEl("option", {
+      text: "Restore API key from pre-1.19...",
+      attr: { value: "none", selected: "", disabled: "" },
+    });
+
+    restoreApiKeyDropdown.createEl("option", { text: "OpenAI", attr: { value: "openai" } });
+    restoreApiKeyDropdown.createEl("option", { text: "OpenAI code-davinci-002 Proxy", attr: { value: "ocp" } });
+    restoreApiKeyDropdown.createEl("option", { text: "Cohere", attr: { value: "cohere" } });
+    restoreApiKeyDropdown.createEl("option", { text: "TextSynth", attr: { value: "textsynth" } });
+    restoreApiKeyDropdown.createEl("option", { text: "Azure", attr: { value: "azure" } });
+    restoreApiKeyDropdown.createEl("option", { text: "Anthropic", attr: { value: "anthropic" } });
+
+    restoreApiKeyDropdown.addEventListener("change", (event) => {
+      const provider = (event.target as HTMLSelectElement).value as Provider;
+      let preset = { name: "New preset", provider, model: "", contextLength: "" };
+      switch (provider) {
+        case "openai": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.openaiApiKey || "",
+            // @ts-expect-error
+            organization: this.plugin.settings.openaiOrganization || "",
+          };
+          break;
+        }
+        case "ocp": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.ocpApiKey || "",
+            // @ts-expect-error
+            url: this.plugin.settings.ocpUrl || "",
+          };
+          break;
+        }
+        case "cohere": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.cohereApiKey || "",
+          };
+          break;
+        }
+        case "textsynth": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.textsynthApiKey || "",
+          };
+          break;
+        }
+        case "azure": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.azureApiKey || "",
+            // @ts-expect-error
+            endpoint: this.plugin.settings.azureEndpoint || "",
+          };
+          break;
+        }
+        case "anthropic": {
+          preset = {
+            ...preset,
+            // @ts-expect-error
+            apiKey: this.plugin.settings.anthropicApiKey || "",
+            // // @ts-expect-error
+            // systemPrompt: this.plugin.settings.anthropicSystemPrompt || "",
+            // // @ts-expect-error
+            // userMessage: this.plugin.settings.anthropicUserMessage || "",
+          };
+          break;
+        }
+        default: {
+          throw new Error(`Unknown provider: ${provider}`);
+        }
+      }
+      // @ts-expect-error TODO
       createPreset(preset);
 
-	  restoreApiKeyDropdown.value = "none";
-	});
+      restoreApiKeyDropdown.value = "none";
+    });
 
-	// edit preset fields
+    // edit preset fields
 
     const presetFields = containerEl.createDiv();
 
     const updatePresetFields = () => {
-	  presetFields.empty();
+      presetFields.empty();
 
-	  if (this.plugin.settings.modelPreset === -1) {
-		presetFields.createEl("p", { cls: "loom__no-preset-selected", text: "No preset selected." });
-		return;
-	  }
+      if (this.plugin.settings.modelPreset === -1) {
+        presetFields.createEl("p", { cls: "loom__no-preset-selected", text: "No preset selected." });
+        return;
+      }
 
-	  new Setting(presetFields).setName("Name").addText((text) =>
-	    text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].name).onChange((value) => {
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].name = value;
-	  	  this.plugin.saveAndRender();
-	  	  updatePresetList();
-	    }),
-	  );
+      new Setting(presetFields).setName("Name").addText((text) =>
+        text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].name).onChange((value) => {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].name = value;
+          this.plugin.saveAndRender();
+          updatePresetList();
+        }),
+      );
 
-	  new Setting(presetFields).setName("Provider").addDropdown((dropdown) => {
-	    const options: Record<string, string> = {
-	  	  cohere: "Cohere",
-	  	  textsynth: "TextSynth",
-	  	  ocp: "OpenAI code-davinci-002 Proxy",
-	  	  openai: "OpenAI",
-	  	  "openai-chat": "OpenAI (Chat)",
-	  	  azure: "Azure",
-	  	  "azure-chat": "Azure (Chat)",
-        anthropic: "Anthropic",
-	    };
-	    dropdown.addOptions(options);
-	    dropdown.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider);
-	    dropdown.onChange(async (value) => {
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = value;
-	  	  await this.plugin.save();
-		  updatePresetFields();
-	    });
-	  });
+      new Setting(presetFields).setName("Provider").addDropdown((dropdown) => {
+        const options: Record<string, string> = {
+          cohere: "Cohere",
+          textsynth: "TextSynth",
+          ocp: "OpenAI code-davinci-002 Proxy",
+          openai: "OpenAI",
+          "openai-chat": "OpenAI (Chat)",
+          azure: "Azure",
+          "azure-chat": "Azure (Chat)",
+          anthropic: "Anthropic",
+          together: "Together",
+        };
+        dropdown.addOptions(options);
+        dropdown.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider = value;
+          await this.plugin.save();
+          updatePresetFields();
+        });
+      });
 
-	  new Setting(presetFields).setName("Model").addText((text) =>
-	    text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model).onChange(async (value) => {
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = value;
-	  	  await this.plugin.save();
-	    }),
-	  );
+      new Setting(presetFields).setName("Model").addText((text) =>
+        text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model).onChange(async (value) => {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].model = value;
+          await this.plugin.save();
+        }),
+      );
 
-	  new Setting(presetFields).setName("Context length").addText((text) =>
-	    text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength.toString()).onChange(async (value) => {
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = parseInt(value);
-	  	  await this.plugin.save();
-	    }),
-	  );
+      new Setting(presetFields).setName("Context length").addText((text) =>
+        text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength.toString()).onChange(async (value) => {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].contextLength = parseInt(value);
+          await this.plugin.save();
+        }),
+      );
 
-	  new Setting(presetFields).setName("API key").addText((text) =>
-	    text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].apiKey).onChange(async (value) => {
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].apiKey = value;
-	  	  await this.plugin.save();
-	    }),
-	  );
+      if (this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider === "openai") {
+        new Setting(presetFields).setName("URL").addText((text) =>
+          text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url!).onChange(async (value) => {
+            this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url = value;
+            await this.plugin.save();
+          }),
+        );
+      }
 
-	  if (["openai", "openai-chat"].includes(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider)) {
-	    new Setting(presetFields).setName("Organization").addText((text) =>
-		  // @ts-expect-error TODO
-	      text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].organization).onChange(async (value) => {
-		    // @ts-expect-error TODO
-	  	    this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].organization = value;
-	  	    await this.plugin.save();
-	      }),
-	    );
-	  }
+      new Setting(presetFields).setName("API key").addText((text) =>
+        text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].apiKey).onChange(async (value) => {
+          this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].apiKey = value;
+          await this.plugin.save();
+        }),
+      );
 
-	  if (["ocp", "azure", "azure-chat"].includes(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider)) {
-	    new Setting(presetFields).setName("URL").addText((text) =>
-	      // @ts-expect-error TODO
-	  	text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url).onChange(async (value) => {
-	  	  // @ts-expect-error TODO
-	  	  this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url = value;
-	  	  await this.plugin.save();
-	  	}),
-	    );
-	  }
-	}
+      if (["openai", "openai-chat"].includes(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider)) {
+        new Setting(presetFields).setName("Organization").addText((text) =>
+          // @ts-expect-error TODO
+          text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].organization).onChange(async (value) => {
+            // @ts-expect-error TODO
+            this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].organization = value;
+            await this.plugin.save();
+          }),
+        );
+      }
+
+      if (["ocp", "azure", "azure-chat"].includes(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].provider)) {
+        new Setting(presetFields).setName("URL").addText((text) =>
+          // @ts-expect-error TODO
+          text.setValue(this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url).onChange(async (value) => {
+            this.plugin.settings.modelPresets[this.plugin.settings.modelPreset].url = value;
+            await this.plugin.save();
+          }),
+        );
+      }
+    }
 
     const updatePresetList = () => {
-	  presetList.empty();
-	  for (const i in this.plugin.settings.modelPresets) {
-		const preset = this.plugin.settings.modelPresets[i];
-		const isActive = this.plugin.settings.modelPreset === parseInt(i);
+      presetList.empty();
+      for (const i in this.plugin.settings.modelPresets) {
+        const preset = this.plugin.settings.modelPresets[i];
+        const isActive = this.plugin.settings.modelPreset === parseInt(i);
 
-	    const presetContainer = presetList.createDiv(
-		  { cls: `loom__preset is-clickable outgoing-link-item tree-item-self${isActive ? " is-active" : ""}` }
-	    );
-		presetContainer.addEventListener("click", () => selectPreset(parseInt(i)));
+        const presetContainer = presetList.createDiv(
+          { cls: `loom__preset is-clickable outgoing-link-item tree-item-self${isActive ? " is-active" : ""}` }
+        );
+        presetContainer.addEventListener("click", () => selectPreset(parseInt(i)));
 
-	    presetContainer.createSpan({ cls: "loom__preset-name tree-item-inner", text: preset.name });
+        presetContainer.createSpan({ cls: "loom__preset-name tree-item-inner", text: preset.name });
 
-		const deletePresetOuter = presetContainer.createDiv({ cls: "loom__preset-buttons" });
-		const deletePresetInner = deletePresetOuter.createDiv({
-		  cls: "loom__preset-button",
-		  attr: { "aria-label": "Delete" },
-		});
-		setIcon(deletePresetInner, "trash-2");
-		deletePresetInner.addEventListener("click", (event) => {
+        const deletePresetOuter = presetContainer.createDiv({ cls: "loom__preset-buttons" });
+        const deletePresetInner = deletePresetOuter.createDiv({
+          cls: "loom__preset-button",
+          attr: { "aria-label": "Delete" },
+        });
+        setIcon(deletePresetInner, "trash-2");
+        deletePresetInner.addEventListener("click", (event) => {
           event.stopPropagation();
-		  deletePreset(parseInt(i))
-		});
-	  }
-	};
+          deletePreset(parseInt(i))
+        });
+      }
+    };
 
-	updatePresetFields();
-	updatePresetList();
+    updatePresetFields();
+    updatePresetList();
 
     // TODO simplify below?
 
-	const passagesHeader = containerEl.createDiv({ cls: "setting-item setting-item-heading" });
-	passagesHeader.createDiv({ cls: "setting-item-name", text: "Passages" });
+    const passagesHeader = containerEl.createDiv({ cls: "setting-item setting-item-heading" });
+    passagesHeader.createDiv({ cls: "setting-item-name", text: "Passages" });
 
-  const setting = (
-	  name: string,
-	  key: LoomSettingKey,
-	  toText: (value: any) => string,
-	  fromText: (text: string) => any
-	) => {
+    const setting = (
+      name: string,
+      key: LoomSettingKey,
+      toText: (value: any) => string,
+      fromText: (text: string) => any
+    ) => {
       new Setting(containerEl).setName(name).addText((text) =>
-	    text.setValue(toText(this.plugin.settings[key])).onChange(async (value) => {
-		  // @ts-expect-error
-		  this.plugin.settings[key] = fromText(value);
-		  await this.plugin.save();
-		})
-	  );
-	}
+        text.setValue(toText(this.plugin.settings[key])).onChange(async (value) => {
+          // @ts-expect-error
+          this.plugin.settings[key] = fromText(value);
+          await this.plugin.save();
+        })
+      );
+    }
 
-  const idSetting = (name: string, key: LoomSettingKey) =>
-    setting(name, key, (value) => value, (text) => text);
+    const idSetting = (name: string, key: LoomSettingKey) =>
+      setting(name, key, (value) => value, (text) => text);
 
-  new Setting(containerEl)
-    .setName("Passage folder location")
-    .setDesc("Passages can be quickly combined into a multipart prompt")
-    .addText((text) =>
-      text.setValue(this.plugin.settings.passageFolder).onChange(async (value) => {
-        this.plugin.settings.passageFolder = value;
-        await this.plugin.save();
-      })
-    );
-	
+    new Setting(containerEl)
+      .setName("Passage folder location")
+      .setDesc("Passages can be quickly combined into a multipart prompt")
+      .addText((text) =>
+        text.setValue(this.plugin.settings.passageFolder).onChange(async (value) => {
+          this.plugin.settings.passageFolder = value;
+          await this.plugin.save();
+        })
+      );
+
     idSetting("Default passage separator", "defaultPassageSeparator");
     idSetting("Default passage frontmatter", "defaultPassageFrontmatter");
 
 
     const debugHeader = containerEl.createDiv({ cls: "setting-item setting-item-heading" });
     debugHeader.createDiv({ cls: "setting-item-name", text: "Debug" });
-  
+
     new Setting(containerEl)
       .setName("Log API calls")
       .setDesc("Log API calls to the console")
@@ -1991,11 +2036,11 @@ class LoomSettingTab extends PluginSettingTab {
         })
       );
 
-    new Setting(containerEl)  
-    
+    new Setting(containerEl)
+
   }
 
 
-    
+
 
 }

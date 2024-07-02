@@ -1,21 +1,21 @@
+// #############################
+// common.ts
+
 export const PROVIDERS = ["cohere", "textsynth", "ocp", "openai", "openai-chat", "azure", "azure-chat", "anthropic"];
 export type Provider = (typeof PROVIDERS)[number];
 
 type ProviderProps = {
-  "openai": { organization: string };
+  "openai": { 
+    organization: string };
   "openai-chat": { organization: string };
-  "ocp": { url: string };
-  "azure": { url: string };
-  "azure-chat": { url: string };
-  "anthropic": { url: string };//, systemPrompt: string, userMessage: string };
 };
 
 type SharedPresetSettings = {
   name: string;
-
   model: string;
   contextLength: number;
   apiKey: string;
+  url?: string;
 };
 
 export type ModelPreset<P extends Provider> = SharedPresetSettings & (P extends keyof ProviderProps ? ProviderProps[P] : {}) & { provider: P };
